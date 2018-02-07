@@ -1,0 +1,17 @@
+[global]
+ioengine=fio_virtio
+thread=1
+group_reporting=1
+direct=1
+verify=0
+time_based=1
+ramp_time=0
+runtime=10
+iodepth=128
+rw=randrw
+bs=4k
+hugepage_mem=1024
+
+[test]
+numjobs=1
+filename=/repos/spdk/vhost.0

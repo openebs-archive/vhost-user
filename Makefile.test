@@ -1,0 +1,22 @@
+
+ifeq ($(RTE_SDK),)
+	$(error RTE_SDK is not defined)
+endif
+
+RTE_TARGET ?= x86_64-native-linuxapp-gcc
+
+include $(RTE_SDK)/mk/rte.vars.mk
+
+CFLAGS += -ggdb3 -O0 -DDEBUG
+CFLAGS += -Wall -Werror
+LDLIBS += -lrte_eal -lpthread
+
+APP = test
+
+LIB_SRC := vhost_client.c vhost_user.c shm.c vring.c
+LIB_SRC += virtio_task.c vring_poller.c virtio_dev.c
+APP_SRC := test.c
+
+SRCS-y := $(LIB_SRC) $(APP_SRC)
+
+include $(RTE_SDK)/mk/rte.extapp.mk
