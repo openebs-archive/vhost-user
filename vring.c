@@ -128,6 +128,7 @@ vring_set_desc(vring_t *vring, uint16_t idx, virtio_buffer_t *vbuf, bool last)
 	vring->desc[idx].flags = flags;
 	//desc[idx].next = ... will be set later
 	debug("Setting descriptor %d\n", idx);
+	vring->free_count--;
 }
 
 /*
@@ -139,10 +140,11 @@ vring_flush(vring_t *vring, uint16_t desc_idx)
 {
 	struct vring_avail *avail = vring->avail;
 	int rc;
+	int mask = vring->num - 1;
 
-	avail->ring[avail->idx] = desc_idx;
+	avail->ring[avail->idx & mask] = desc_idx;
 	__asm volatile("" ::: "memory");
-	avail->idx = (avail->idx + 1) % vring->num;
+	avail->idx++;
 
 	debug("Flush vring (descriptor = %d, avail idx = %d)\n",
 	    desc_idx, avail->idx);
@@ -193,10 +195,9 @@ vring_put_task(vring_t *vring, virtio_task_t *task)
 		    (i == task->count - 1));
 		// mark the desc slot as used by the task
 		vring->tasks[vring->task_idx] = task;
-		prev_idx = vring->task_idx;
+		prev_idx = vring->task_idx++;
 		vring->task_idx = (vring->task_idx + 1) % vring->num;
 	}
-	vring->free_count -= task->count;
 	vring_flush(vring, task->vring_idx);
 
 	return (0);
@@ -212,14 +213,15 @@ vring_get_task(vring_t *vring)
 	uint16_t u_idx = vring->last_used_idx;
 	uint16_t desc_idx, idx;
 	virtio_task_t *task;
+	int mask = vring->num - 1;
 
 	// used index in SPDK can overflow
-	if (u_idx == used->idx % vring->num)
+	if ((u_idx & mask) == (used->idx & mask))
 		return (NULL);
 
-	desc_idx = used->ring[u_idx].id;
+	desc_idx = used->ring[u_idx & mask].id;
 	task = vring->tasks[desc_idx];
-	task->used_bytes = used->ring[u_idx].len;
+	task->used_bytes = used->ring[u_idx & mask].len;
 	assert(task->vring_idx == desc_idx);
 	debug("Descriptor %d is ready\n", desc_idx);
 	// mark all descs used by task as free
@@ -228,11 +230,11 @@ vring_get_task(vring_t *vring)
 	    idx = vring->desc[idx].next) {
 		assert(vring->tasks[idx] != NULL);
 		vring->tasks[idx] = NULL;
+		vring->free_count++;
 	}
 	vring->tasks[idx] = NULL;
-
-	vring->free_count += task->count;
-	vring->last_used_idx = (u_idx + 1) % vring->num;
+	vring->free_count++;
+	vring->last_used_idx = u_idx + 1;
 
 	return (task);
 }

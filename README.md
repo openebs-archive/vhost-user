@@ -33,11 +33,15 @@ writting to a file in /sys (as root):
 echo 4 > /sys/kernel/mm/hugepages/hugepages-1048576kB/nr_hugepages
 ```
 
+Note that the max number of huge pages that vhost-user lib can handle is
+currently set to 8.
+
 ## Dependencies
 
 DPDK's memory allocator and ring buffer implementation is used in the library
-(until we have our own implementation of these two features). You need to checkout
-code from DPDK's repo:
+(until we have our own implementation of these two features). You can either
+checkout DPDK repo or use SPDK's DPDK submodule in case you already have
+SPDK sources on your machine. Using DPDK repo:
 
 ```
 git clone git://dpdk.org/dpdk
@@ -46,9 +50,25 @@ make config T=x86_64-native-linuxapp-gcc
 make T=x86_64-native-linuxapp-gcc EXTRA_CFLAGS=-fPIC
 ```
 
-fPIC is needed for building fio engine shared library. For building FIO engine
-fio sources are needed (in fact only the header files, but you can build the
-fio and run it from repo):
+fPIC is needed for building fio engine shared library. Using SPDK's DPDK
+submodule:
+
+```
+git clone https://github.com/spdk/spdk.git
+cd spdk
+git submodule update --init
+./configure --with-fio
+make
+cd dpdk
+ln -s build x86_64-native-linuxapp-gcc
+```
+
+Configure option --with-fio takes care of building DPDK with -fPIC. The symlink
+created in last step is needed for DPDK's makefiles for external apps, so
+that they can find DPDK libraries.
+
+For building FIO engine fio sources are needed (in fact only the header files,
+but you can build the fio and run it from repo):
 
 ```
 git clone https://github.com/axboe/fio

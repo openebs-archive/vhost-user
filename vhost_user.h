@@ -36,7 +36,7 @@
 
 #include <stdint.h>
 
-#define	VHOST_MEMORY_MAX_NREGIONS	1
+#define	VHOST_MEMORY_MAX_NREGIONS	8
 
 // Structures and defines imported from the Linux headers.
 
