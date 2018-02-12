@@ -34,8 +34,9 @@
 /*
  * VirtIO Vring implementation.
  *
- * The module provides vring and basic operations without any access
- * synchronization. Concurrency must be solved at higher level.
+ * The module provides vring and basic operations.
+ * Enqueuing is multi-threaded safe, dequeuing is not. That is aligned with
+ * how the library is intended to be used.
  */
 
 #include <assert.h>
@@ -75,8 +76,8 @@ vring_create(void)
 	vring->avail = &vring_shm->avail;
 	vring->used = &vring_shm->used;
 	vring->num = VHOST_VRING_SIZE;
-	vring->free_count = VHOST_VRING_SIZE;
-	vring->last_used_idx = 0;
+	vring->last_used_idx = vring->used->idx;
+	vring->last_avail_idx = vring->avail->idx;
 
 	vring->kickfd = eventfd(0, EFD_NONBLOCK);
 	if (vring->kickfd < 0) {
@@ -91,6 +92,9 @@ vring_create(void)
 		free(vring);
 		return (NULL);
 	}
+#if (SLEEPY_POLL != 0)
+	vring->avail->flags = VRING_AVAIL_F_NO_INTERRUPT;
+#endif
 
 	return (vring);
 }
@@ -128,26 +132,39 @@ vring_set_desc(vring_t *vring, uint16_t idx, virtio_buffer_t *vbuf, bool last)
 	vring->desc[idx].flags = flags;
 	//desc[idx].next = ... will be set later
 	debug("Setting descriptor %d\n", idx);
-	vring->free_count--;
 }
 
 /*
  * Update avail ring with index of added descriptor and optionally notify the
  * other end about the change.
+ *
+ * Function is MT-safe.
  */
 static void
 vring_flush(vring_t *vring, uint16_t desc_idx)
 {
 	struct vring_avail *avail = vring->avail;
+	uint16_t idx;
+	uint16_t mask = vring->num - 1;
+	bool success = false;
 	int rc;
-	int mask = vring->num - 1;
 
-	avail->ring[avail->idx & mask] = desc_idx;
+	// this must succeed, ring cannot be full if we previously allocated descs
+	while (!success) {
+		idx = vring->last_avail_idx;
+		success = __sync_bool_compare_and_swap(&vring->last_avail_idx, idx, idx + 1);
+	}
+	avail->ring[idx & mask] = desc_idx;
+
 	__asm volatile("" ::: "memory");
-	avail->idx++;
+
+	success = false;
+	while (!success) {
+		success = __sync_bool_compare_and_swap(&avail->idx, idx, idx + 1);
+	}
 
 	debug("Flush vring (descriptor = %d, avail idx = %d)\n",
-	    desc_idx, avail->idx);
+	    desc_idx, idx);
 
 	if ((vring->used->flags & VRING_USED_F_NO_NOTIFY) == 0) {
 		uint64_t kick_it = 1;
@@ -160,43 +177,63 @@ vring_flush(vring_t *vring, uint16_t desc_idx)
 }
 
 /*
- * Save task to vring descriptors.
+ * Save task to vring descriptors. This function is multi-producer safe.
+ * It returns zero if successful or negative number if vring is full.
  *
- * It returns index of inserted item in vring or negative number if failed.
- * If the function fails it means that vring is full.
+ * Function is MT-safe.
  */
 int
 vring_put_task(vring_t *vring, virtio_task_t *task)
 {
-	uint16_t task_idx_saved = vring->task_idx;
 	uint16_t prev_idx;
-
-	// is there a space for the task?
-	if (task->count > vring->free_count)
-		return (-1);
+	uint16_t slots[task->count];
+	uint16_t mask = vring->num - 1;
 
 	for (int i = 0; i < task->count; i++) {
-		// find a free slot
-		while (vring->tasks[vring->task_idx] != NULL) {
-			vring->task_idx = (vring->task_idx + 1) % vring->num;
-			assert(vring->task_idx != task_idx_saved);
+		uint16_t desc_idx_saved = vring->task_idx;
+		uint16_t desc_idx = desc_idx_saved;
+		bool success = false;
+		bool full = false;
+
+		while (!success) {
+			// find a free slot
+			while (vring->tasks[desc_idx] != NULL) {
+				desc_idx = (desc_idx + 1) & mask;
+				if (desc_idx == desc_idx_saved) {
+					full = true;
+					break;
+				}
+
+			}
+			if (full)
+				break;
+			success = __sync_bool_compare_and_swap(&vring->tasks[desc_idx],
+			    NULL, task);
 		}
+		if (!success || full) {
+			// all slots occupied, free previously allocated slots
+			for (int j = 0; j < i; j++)
+				vring->tasks[slots[j]] = NULL;
+			return (-1);
+		}
+		slots[i] = desc_idx;
+
+		// exact value of desc_idx in vring struct is not important - just
+		// an optimization not to start iteration always from beginning
+		vring->task_idx = (desc_idx + 1) & mask;
 
 		if (i == 0) {
 			// store head of the descriptor chain to task
-			task->vring_idx = vring->task_idx;
-			vring->tasks[vring->task_idx] = task;
+			task->vring_idx = desc_idx;
 		} else {
 			// set next pointer of previous descriptor now when we know it
-			vring->desc[prev_idx].next = vring->task_idx;
+			vring->desc[prev_idx].next = desc_idx;
 		}
 
-		vring_set_desc(vring, vring->task_idx, &task->vbufs[i],
+		vring_set_desc(vring, desc_idx, &task->vbufs[i],
 		    (i == task->count - 1));
 		// mark the desc slot as used by the task
-		vring->tasks[vring->task_idx] = task;
-		prev_idx = vring->task_idx++;
-		vring->task_idx = (vring->task_idx + 1) % vring->num;
+		prev_idx = desc_idx;
 	}
 	vring_flush(vring, task->vring_idx);
 
@@ -205,6 +242,8 @@ vring_put_task(vring_t *vring, virtio_task_t *task)
 
 /*
  * Return task which has been completed (from used ring) or NULL.
+ *
+ * This is *NOT* MT-safe.
  */
 virtio_task_t *
 vring_get_task(vring_t *vring)
@@ -224,16 +263,14 @@ vring_get_task(vring_t *vring)
 	task->used_bytes = used->ring[u_idx & mask].len;
 	assert(task->vring_idx == desc_idx);
 	debug("Descriptor %d is ready\n", desc_idx);
-	// mark all descs used by task as free
+	// mark all descs used by the task as free
 	for (idx = desc_idx;
 	    (vring->desc[idx].flags & VIRTIO_DESC_F_NEXT) != 0;
 	    idx = vring->desc[idx].next) {
 		assert(vring->tasks[idx] != NULL);
 		vring->tasks[idx] = NULL;
-		vring->free_count++;
 	}
 	vring->tasks[idx] = NULL;
-	vring->free_count++;
 	vring->last_used_idx = u_idx + 1;
 
 	return (task);

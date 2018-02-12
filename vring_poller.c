@@ -43,14 +43,10 @@
 #include "vring_poller.h"
 #include "common.h"
 
-// Input/output lock-less ring size (should be based on vring size)
-#define INRING_SIZE	1024
-
 struct vring_poller {
 	pthread_t tid;
 	bool end;
 	vring_t *vring;
-	struct rte_ring *inring;
 };
 
 vring_poller_t *
@@ -61,14 +57,6 @@ vring_poller_create(vring_t *vring)
 	poller = malloc(sizeof (*poller));
 	if (poller == NULL) {
 		fprintf(stderr, "Unable to allocate poller\n");
-		return (NULL);
-	}
-
-	poller->inring = rte_ring_create("input_request_ring", INRING_SIZE,
-				 SOCKET_ID_ANY, 0);
-	if (poller->inring == NULL) {
-		fprintf(stderr, "Unable to allocate input request ring\n");
-		free(poller);
 		return (NULL);
 	}
 
@@ -85,74 +73,53 @@ vring_poller_destroy(vring_poller_t *poller)
 	if (poller->tid != 0)
 		vring_poller_stop(poller);
 
-	rte_ring_free(poller->inring);
 	free(poller);
 }
 
 /*
- * Dispatch new IOs and call callbacks for processed IOs in a loop.
+ * Call callbacks for processed IOs in a loop.
  */
 static void *
 vring_poll(void *arg)
 {
 	vring_poller_t *self = arg;
 	vring_t *vring = self->vring;
-	virtio_task_t *task, *pend_intask = NULL;
-	int rc;
-	bool worked;
+	virtio_task_t *task;
+	int worked;
 
 	while (!self->end) {
-		worked = false;
+		worked = 0;
 
 		// look for finished IOs
-		task = vring_get_task(vring);
-		if (task != NULL) {
+		while ((task = vring_get_task(vring)) != NULL) {
 			if (task->cb != NULL) {
 				task->cb(task, task->arg);
 			}
-			if (pend_intask != NULL) {
-				rc = vring_put_task(self->vring, pend_intask);
-				if (rc == 0)
-					pend_intask = NULL;
-			}
-			worked = true;
+			worked++;
 		}
 
-		// look for new IOs
-		if (pend_intask == NULL) {
-			void *taskp;
-
-			rc = rte_ring_sc_dequeue(self->inring, &taskp);
-			if (rc == 0) {
-				rc = vring_put_task(self->vring, taskp);
-				if (rc != 0)
-					pend_intask = taskp;
-				worked = true;
-			}
-		}
-
-		// if no work, wait for being notified
-		if (!worked) {
 #if (SLEEPY_POLL == 0)
-			struct pollfd fds;
-			uint64_t poll_data;
+		// if no work, wait for being notified
+		int rc;
+		struct pollfd fds;
+		uint64_t poll_data;
 
-			fds.fd = vring->callfd;
-			fds.events = POLLIN;
-			fds.revents = 0;
-	
-			rc = poll(&fds, 1, 1000);
-			if (rc < 0) {
-				perror("poll");
-				break;
-			} else if (rc > 0 && (fds.revents & POLLIN) != 0) {
-				rc = read(fds.fd, &poll_data, sizeof (poll_data));
-				assert(rc == sizeof (poll_data));
-			}
-#else
-			usleep(SLEEPY_POLL);
-#endif
+		fds.fd = vring->callfd;
+		fds.events = POLLIN;
+		fds.revents = 0;
+
+		rc = poll(&fds, 1, 100);
+		if (rc < 0) {
+			perror("poll");
+			break;
+		} else if (rc > 0 && (fds.revents & POLLIN) != 0) {
+			rc = read(fds.fd, &poll_data, sizeof (poll_data));
+			assert(rc == sizeof (poll_data));
 		}
+#else
+		// if no work, sleep for a short time
+		usleep(SLEEPY_POLL);
+#endif
 	}
 
 	self->tid = 0;
@@ -210,20 +177,10 @@ int
 vring_submit_task(vring_poller_t *poller, virtio_task_t *task, task_cb_t cb,
     void *ctx)
 {
-	int rc;
-
 	task->cb = cb;
 	task->arg = ctx;
 
-	rc = rte_ring_mp_enqueue(poller->inring, task);
-#if (SLEEPY_POLL == 0)
-	if (rc == 0) {
-		uint64_t kick = 1;
-		int n = write(poller->vring->callfd, &kick, sizeof (kick));
-		assert(n == sizeof (kick));
-	}
-#endif
-	return ((rc == 0) ? 0 : -1);
+	return vring_put_task(poller->vring, task);
 }
 
 /*
