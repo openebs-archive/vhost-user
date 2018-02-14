@@ -75,6 +75,6 @@ int write_virtio_dev(dev_handle_t hdl, void *buf, size_t blk_offset, size_t nblk
 // async API
 int virtio_submit(struct virtio_dev *dev, async_io_desc_t *io_desc);
 int virtio_completed(struct virtio_dev *dev, int mincount, int timeout);
-async_io_desc_t *virtio_get_completed(struct virtio_dev *dev, int timeout);
+async_io_desc_t *virtio_get_completed(struct virtio_dev *dev);
 
 #endif

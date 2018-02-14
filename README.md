@@ -145,10 +145,36 @@ LD_LIBRARY_PATH=/path/to/repo/build/lib ./fio /path/to/repo/virtio.fio
 Note that multiple fio jobs are not supported at this moment. It has to be
 always set to 1.
 
-#### SLEEPY_POLL
+## Adaptive polling
 
-There is a performance compile-time tunable - SLEEPY_POLL C preprocessor define.
-During testing it was discovered that instead of using eventfd and read/write
-syscalls for delivering events to threads if condition is checked in a loop
-with usleep(interval), the performance is up to 2x better. If you want to try
-it out, you can modify Makefile.fio and change SLEEP_POLL define to i.e. 100ms.
+There are two basic approaches for synchronization between consumer and
+producer. Either event based notification (using eventfd file descriptor
+and read/write syscall) or polling (checking condition in a busy loop).
+As explained earlier busy polling does not play well with multithreaded
+programs using blocking calls. We modified busy polling method by inserting
+relatively short sleep into a busy loop. However that does not perform well
+in all cases and requires manual tuning of sleep interval. For sequential IO
+it increases latency way too much. Hence we utilize both approaches based on
+detected workload. We distinguish between two types of workloads:
+
+ * less than 120,000 IOPS: event based sync decreases latency and performs
+   relatively well.
+ * more than 120,000 IOPS: focused on throughput. During sleep the work is
+   accumulated in queues and later efficiently processed in bulk.
+
+Speaking about polling with sleep - there is no single time interval which fits
+all workloads. Right interval depends on speed of storage device, io depth and
+other characteristics of the system. Hence the library learns what is the best
+sleep interval by dynamically changing it and observing what it does with IOPS.
+That works well for stable workloads without many up and down changes. The main
+advantage is simplicity of code.
+
+## Parameters
+
+At build time following C preprocessor defines can be specified:
+
+ * IOPS_HIGH: Boundary between event driven and time driven poll. Can be
+   set to very high or low value in order to eliminate one of the methods
+   completely.
+ * POLL_DELAY: Fixed delay in poll loop in msecs. If defined it eliminates
+   event based poll altogether.

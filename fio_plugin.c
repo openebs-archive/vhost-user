@@ -228,16 +228,21 @@ virtio_fio_event(struct thread_data *td, int event)
 {
 	assert(event >= 0);
 	dev_handle_t dev = g_hdl;
-	async_io_desc_t *io_desc = virtio_get_completed(dev, 1);
+	async_io_desc_t *io_desc = virtio_get_completed(dev);
 	return (io_desc != NULL) ? io_desc->user_ctx : NULL;
 }
 
+/*
+ * fio calls this function always with min argument equal to one, which is
+ * very inefficient, so we override it (performance goes up by ~10%).
+ */
 static int
 virtio_fio_getevents(struct thread_data *td, unsigned int min,
 		   unsigned int max, const struct timespec *t)
 {
 	dev_handle_t dev = g_hdl;
 	uint64_t ms = -1;
+	min = (td->cur_depth < 10) ? td->cur_depth : 10;
 
 	if (t != NULL)
 		ms = t->tv_sec * 1000 + t->tv_nsec / 1000000;
@@ -292,6 +297,7 @@ struct ioengine_ops ioengine = {
 	.options		= options,
 };
 
+//struct ioengine_ops ioengine = {
 struct ioengine_ops sync_ioengine = {
 	.name			= "virtio_sync",
 	.version		= FIO_IOOPS_VERSION,
