@@ -31,6 +31,7 @@
  *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <assert.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -63,14 +64,18 @@ ssize_t wait_for_io(dev_handle_t dev, uintptr_t io_num)
     struct timespec ts1, ts2;
     async_io_desc_t *io_desc;
     int64_t us;
+    int n;
 
     clock_gettime(CLOCK_REALTIME, &ts1);
 
-    io_desc = virtio_get_completed(dev, 1000);
-    if (io_desc == NULL) {
+    n = virtio_completed(dev, 1, 1000);
+    if (n == 0) {
         fprintf(stderr, "Timed out waiting for IO\n");
         return (-1);
     }
+    io_desc = virtio_get_completed(dev);
+    assert(io_desc != NULL);
+
     if (io_desc->user_ctx != (void *)io_num) {
         fprintf(stderr, "Unexpected IO completed\n");
         return (-1);

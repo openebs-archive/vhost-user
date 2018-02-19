@@ -37,16 +37,31 @@
 #include <unistd.h>
 #include <poll.h>
 #include <pthread.h>
+#include <sys/time.h>
 // lock-less ring buffer implementation from DPDK
 #include <rte_ring.h>
 
 #include "vring_poller.h"
+#include "vhost_user.h"
 #include "common.h"
 
+// when sleep interval is dynamic this is lower and upper bound in ms
+#define SLEEP_MIN	5
+#define SLEEP_MAX	150
+#define SLEEP_DELTA_MAX	((SLEEP_MAX - SLEEP_MIN) >> 1)
+// boundary at which we switch from event based to time based poll
+#ifndef IOPS_HIGH
+#define IOPS_HIGH	120000
+#endif
+
 struct vring_poller {
-	pthread_t tid;
-	bool end;
+	pthread_t tid;	// poller's thread ID
 	vring_t *vring;
+	bool end;	// terminate poller thread
+	unsigned int iops;
+	bool sleepy_poll; // optimized for throughput instead of latency
+	int sleep;	// sleep interval in poll loop in ms
+	int sleep_delta;// last increment(+)/decrement(-) of sleep interval
 };
 
 vring_poller_t *
@@ -63,6 +78,14 @@ vring_poller_create(vring_t *vring)
 	poller->vring = vring;
 	poller->tid = 0;
 	poller->end = false;
+#ifdef POLL_DELAY
+	poller->sleepy_poll = true;
+	poller->sleep = POLL_DELAY;
+#else
+	poller->sleepy_poll = false;
+	poller->sleep = (SLEEP_MIN + SLEEP_MAX) / 2;
+#endif
+	poller->sleep_delta = SLEEP_DELTA_MAX;
 
 	return (poller);
 }
@@ -76,6 +99,76 @@ vring_poller_destroy(vring_poller_t *poller)
 	free(poller);
 }
 
+#ifndef POLL_DELAY
+/*
+ * Evaluate performance and make necessary changes based knowing:
+ * current and previous IOPS, last sleep interval delta.
+ */
+static void
+eval_performance(vring_poller_t *poller, unsigned int iops_old,
+    unsigned int iops_new)
+{
+	int new_delta;
+	int delta_sign = (poller->sleep_delta >= 0) ? 1 : -1;
+
+	if (iops_old == 0 || iops_new == 0)
+		return;
+
+	// figure out change amplifier based on observed perf difference
+	// (i.e. 10k IOPS diff from 400k IOPS -> ~ 10s)
+	new_delta = (((int)(iops_new - iops_old)) << 9) / (int)iops_old;
+	if (new_delta == 0) {
+		if (iops_new >= iops_old)
+			new_delta = 1;
+		else
+			new_delta = -1;
+	}
+	new_delta *= delta_sign;
+
+	if (new_delta > SLEEP_DELTA_MAX)
+		new_delta = SLEEP_DELTA_MAX;
+	if (new_delta < -SLEEP_DELTA_MAX)
+		new_delta = -SLEEP_DELTA_MAX;
+
+	poller->sleep += new_delta;
+	poller->sleep_delta = new_delta;
+
+	if (poller->sleep < SLEEP_MIN)
+		poller->sleep = SLEEP_MIN;
+	if (poller->sleep > SLEEP_MAX)
+		poller->sleep = SLEEP_MAX;
+
+	debug("sleep interval delta: %d\n", poller->sleep_delta);
+	debug("new sleep interval: %d\n", poller->sleep);
+}
+#endif
+
+/*
+ * Wait for a new work. This one is based on events, so expect good latency but
+ * bad throughput.
+ */
+static void
+do_poll(vring_poller_t *poller)
+{
+	int rc;
+	struct pollfd fds;
+	uint64_t poll_data;
+	vring_t *vring = poller->vring;
+
+	fds.fd = vring->callfd;
+	fds.events = POLLIN;
+	fds.revents = 0;
+
+	rc = poll(&fds, 1, SLEEP_MAX);
+	if (rc < 0) {
+		perror("poll");
+		return;
+	} else if (rc > 0 && (fds.revents & POLLIN) != 0) {
+		rc = read(fds.fd, &poll_data, sizeof (poll_data));
+		assert(rc == sizeof (poll_data));
+	}
+}
+
 /*
  * Call callbacks for processed IOs in a loop.
  */
@@ -85,41 +178,57 @@ vring_poll(void *arg)
 	vring_poller_t *self = arg;
 	vring_t *vring = self->vring;
 	virtio_task_t *task;
-	int worked;
+	int iocount;
+	unsigned int iocount_per_sec = 0;
+#ifndef POLL_DELAY
+	time_t second = 0;
+	struct timeval ts;
+	int rc;
+#endif
 
 	while (!self->end) {
-		worked = 0;
+		iocount = 0;
 
 		// look for finished IOs
 		while ((task = vring_get_task(vring)) != NULL) {
 			if (task->cb != NULL) {
 				task->cb(task, task->arg);
 			}
-			worked++;
+			iocount++;
 		}
+		iocount_per_sec += iocount;
 
-#if (SLEEPY_POLL == 0)
-		// if no work, wait for being notified
-		int rc;
-		struct pollfd fds;
-		uint64_t poll_data;
-
-		fds.fd = vring->callfd;
-		fds.events = POLLIN;
-		fds.revents = 0;
-
-		rc = poll(&fds, 1, 100);
-		if (rc < 0) {
-			perror("poll");
-			break;
-		} else if (rc > 0 && (fds.revents & POLLIN) != 0) {
-			rc = read(fds.fd, &poll_data, sizeof (poll_data));
-			assert(rc == sizeof (poll_data));
+#ifndef POLL_DELAY
+		// keep track of iops
+		rc = gettimeofday(&ts, NULL);
+		assert(rc == 0);
+		if (ts.tv_sec != second) {
+			debug("IOPS: %d\n", iocount_per_sec);
+			if (self->sleepy_poll) {
+				// adjust sleep interval
+				eval_performance(self, self->iops,
+				    iocount_per_sec);
+			}
+			self->iops = iocount_per_sec;
+			iocount_per_sec = 0;
+			second = ts.tv_sec;
+			if (!self->sleepy_poll && self->iops > IOPS_HIGH) {
+				debug("Switching to time based poll\n");
+				self->sleepy_poll = true;
+				vring->avail->flags |= VRING_AVAIL_F_NO_INTERRUPT;
+			} else if (self->sleepy_poll && self->iops < IOPS_HIGH) {
+				debug("Switching to event based poll\n");
+				self->sleepy_poll = false;
+				vring->avail->flags &= (~VRING_AVAIL_F_NO_INTERRUPT);
+			}
 		}
-#else
-		// if no work, sleep for a short time
-		usleep(SLEEPY_POLL);
 #endif
+
+		if (!self->sleepy_poll) {
+			do_poll(self);
+		} else {
+			usleep(self->sleep);
+		}
 	}
 
 	self->tid = 0;
@@ -151,19 +260,19 @@ vring_poller_start(vring_poller_t *poller)
 void
 vring_poller_stop(vring_poller_t *poller)
 {
+	uint64_t event = 1;
+	int rc;
+
 	if (poller->tid == 0)
 		return;
 
 	poller->end = true;
 
-#if (SLEEPY_POLL == 0)
-	uint64_t event = 1;
-	int rc = write(poller->vring->callfd, &event, sizeof (event));
+	rc = write(poller->vring->callfd, &event, sizeof (event));
 	assert(rc == sizeof (event));
-#endif
 
 	while (poller->tid != 0) {
-		usleep(100);
+		usleep(SLEEP_MAX);
 	}
 }
 

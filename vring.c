@@ -92,9 +92,6 @@ vring_create(void)
 		free(vring);
 		return (NULL);
 	}
-#if (SLEEPY_POLL != 0)
-	vring->avail->flags = VRING_AVAIL_F_NO_INTERRUPT;
-#endif
 
 	return (vring);
 }

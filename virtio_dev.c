@@ -86,9 +86,8 @@ struct virtio_dev {
 	size_t cap;
 	// async IOs
 	struct rte_ring *outring;
-#if (SLEEPY_POLL == 0)
 	int outfd;
-#endif
+	int event_high_wm;	// high-water mark for generating event
 };
 
 int
@@ -265,13 +264,12 @@ open_virtio_dev(const char *sock)
 				 SOCKET_ID_ANY, 0);
 	if (dev->outring == NULL)
 		goto error;
-#if (SLEEPY_POLL == 0)
+	dev->event_high_wm = 0;
 	/* notifications when new item arrives to output ring go here */
 	dev->outfd = eventfd(0, EFD_NONBLOCK);
 	if (dev->outfd < 0) {
 		goto error;
 	}
-#endif
 
 	// TODO: we ignore all other rings except request ring
 	dev->poller = vring_poller_create(dev->vring[VIRTIO_SCSI_REQUESTQ]);
@@ -301,10 +299,8 @@ error:
 	}
 	if (dev->outring != NULL)
 		rte_ring_free(dev->outring);
-#if (SLEEPY_POLL == 0)
 	if (dev->outfd > 0)
 		close(dev->outfd);
-#endif
 	free(dev);
 	return (NULL);
 }
@@ -318,9 +314,7 @@ close_virtio_dev(dev_handle_t hdl)
 	end_vhost_client(dev->client);
 	for (int i = 0; i < VIRTIO_SCSI_QCOUNT; i++)
 		vring_destroy(dev->vring[i]);
-#if (SLEEPY_POLL == 0)
 	close(dev->outfd);
-#endif
 	rte_ring_free(dev->outring);
 	free(dev);
 }
@@ -627,24 +621,19 @@ static void
 push_to_outring(struct virtio_dev *dev, async_io_desc_t *io_desc)
 {
 	int rc;
-#if (SLEEPY_POLL == 0)
-	uint64_t kick_it = 1;
-	int was_empty;
 
-	was_empty = rte_ring_empty(dev->outring);
-#endif
 	rc = rte_ring_sp_enqueue(dev->outring, io_desc);
 	// XXX implement throttling
 	assert(rc == 0);
 
-#if (SLEEPY_POLL == 0)
-	// kick only if someone is possibly stuck at empty ring
-	if (was_empty) {
+	if (dev->event_high_wm > 0 &&
+	    dev->event_high_wm <= rte_ring_count(dev->outring)) {
+		uint64_t kick_it = 1;
+
 		rc = write(dev->outfd, &kick_it, sizeof(kick_it));
 		assert(rc == sizeof(kick_it));
 		fsync(dev->outfd);
 	}
-#endif
 }
 
 /*
@@ -1164,29 +1153,32 @@ virtio_submit(struct virtio_dev *dev, async_io_desc_t *io_desc)
  * Return number of asynchronous tasks waiting for pick up from the
  * output ring.
  * Negative timeout means wait for mincount condition forever.
+ *
+ * NOTE: This function is not reentrant.
  */
 int
 virtio_completed(struct virtio_dev *dev, int mincount, int timeout)
 {
-#if (SLEEPY_POLL == 0)
 	struct pollfd fds;
 	uint64_t poll_data;
 	int rc;
-	int delay = 100;
-#else
-	int delay = SLEEPY_POLL;
-#endif
 	int total_time = 0;
-	int n = rte_ring_count(dev->outring);
+	int n;
+	int delay = 100;  // in ms
 
-	if (n >= mincount)
+	assert(mincount > 0);
+	dev->event_high_wm = mincount;
+
+	n = rte_ring_count(dev->outring);
+	if (n >= mincount) {
+		dev->event_high_wm = 0;
 		return (n);
+	}
 
 	// enter poll loop until timeout or n == mincount
 	do {
 		if (timeout >= 0 && total_time >= timeout)
-			return n;
-#if (SLEEPY_POLL == 0)
+			return (n);
 		fds.fd = dev->outfd;
 		fds.events = POLLIN;
 		fds.revents = 0;
@@ -1198,30 +1190,22 @@ virtio_completed(struct virtio_dev *dev, int mincount, int timeout)
 			rc = read(fds.fd, &poll_data, sizeof (poll_data));
 			assert(rc == sizeof (poll_data));
 		}
-#else
-		usleep(delay);
-#endif
 		total_time += delay;
 	} while ((n = rte_ring_count(dev->outring)) < mincount);
 
+	dev->event_high_wm = 0;
 	return (n);
 }
 
 /*
- * Return completed task from output ring buffer or NULL if there is none
- * and timeout (in ms) has ellapsed.
+ * Return completed task from output ring buffer or NULL if there is none.
  */
 async_io_desc_t *
-virtio_get_completed(struct virtio_dev *dev, int timeout)
+virtio_get_completed(struct virtio_dev *dev)
 {
 	void *desc;
 	int rc;
 
-	rc = virtio_completed(dev, 1, timeout);
-	if (rc > 0) {
-		rc = rte_ring_mc_dequeue(dev->outring, &desc);
-		return (rc == 0) ? desc : NULL;
-	} else {
-		return (NULL);
-	}
+	rc = rte_ring_mc_dequeue(dev->outring, &desc);
+	return (rc == 0) ? desc : NULL;
 }

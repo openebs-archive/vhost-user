@@ -40,9 +40,4 @@
 #define	debug(...)
 #endif
 
-// decides if we sleep instead of using poll + eventfd
-#ifndef SLEEPY_POLL
-#define	SLEEPY_POLL	0
-#endif
-
 #endif   // _VIRTIO_COMMON_H
