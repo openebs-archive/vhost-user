@@ -64,7 +64,7 @@ vring_create(void)
 	}
 
 	/* allocate vring from the shared memory */
-	vring_shm = zalloc_shared_buf(sizeof (struct vhost_vring));
+	vring_shm = zalloc_shared_buf(sizeof (struct vhost_vring), 0);
 	if (vring_shm == NULL) {
 		fprintf(stderr, "vring allocation failed\n");
 		free(vring);

@@ -1,6 +1,7 @@
 /*-
  *   BSD LICENSE
  *
+ *   Copyright (c) Intel Corporation.
  *   Copyright (c) Cloudbyte Corporation.
  *   All rights reserved.
  *
@@ -160,15 +161,15 @@ init_shared_mem(int mem_mb)
 }
 
 void *
-alloc_shared_buf(int size)
+alloc_shared_buf(int size, int alignment)
 {
-	return rte_malloc_socket(NULL, size, 0, SOCKET_ID_ANY);
+	return rte_malloc_socket(NULL, size, alignment, SOCKET_ID_ANY);
 }
 
 void *
-zalloc_shared_buf(int size)
+zalloc_shared_buf(int size, int alignment)
 {
-	void *buf = rte_malloc_socket(NULL, size, 0, SOCKET_ID_ANY);
+	void *buf = rte_malloc_socket(NULL, size, alignment, SOCKET_ID_ANY);
 	if (buf != NULL)
 		memset(buf, 0, size);
 	return (buf);

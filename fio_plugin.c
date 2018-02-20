@@ -88,10 +88,12 @@ virtio_fio_setup(struct thread_data *td)
 			}
 
 			filename = f->file_name;
-			f->real_file_size = capacity_virtio_dev(g_hdl);
+			f->real_file_size = virtio_dev_block_size(g_hdl) *
+			    virtio_dev_blocks_num(g_hdl);
 			f->engine_data = g_hdl;
 		} else {
-			f->real_file_size = capacity_virtio_dev(g_hdl);
+			f->real_file_size = virtio_dev_block_size(g_hdl) *
+			    virtio_dev_blocks_num(g_hdl);
 			f->engine_data = g_hdl;
 		}
 	}
@@ -114,14 +116,14 @@ virtio_fio_close(struct thread_data *td, struct fio_file *f)
 static int
 virtio_fio_iomem_alloc(struct thread_data *td, size_t total_mem)
 {
-	td->orig_buffer = zalloc_shared_buf(total_mem);
+	td->orig_buffer = virtio_buf_alloc(g_hdl, total_mem);
 	return td->orig_buffer == NULL;
 }
 
 static void
 virtio_fio_iomem_free(struct thread_data *td)
 {
-	free_shared_buf(td->orig_buffer);
+	virtio_buf_free(td->orig_buffer);
 }
 
 static int
@@ -313,12 +315,12 @@ struct ioengine_ops sync_ioengine = {
 	.options		= options,
 };
 
-static void fio_init spdk_fio_register(void)
+static void fio_init virtio_fio_register(void)
 {
 	register_ioengine(&ioengine);
 }
 
-static void fio_exit spdk_fio_unregister(void)
+static void fio_exit virtio_fio_unregister(void)
 {
 	if (g_virtio_env_initialized) {
 		if (g_hdl != NULL) {

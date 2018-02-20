@@ -320,11 +320,19 @@ close_virtio_dev(dev_handle_t hdl)
 }
 
 size_t
-capacity_virtio_dev(dev_handle_t hdl)
+virtio_dev_block_size(dev_handle_t hdl)
 {
 	struct virtio_dev *dev = hdl;
 
-	return (dev->cap);
+	return (dev->block_size);
+}
+
+size_t
+virtio_dev_blocks_num(dev_handle_t hdl)
+{
+	struct virtio_dev *dev = hdl;
+
+	return (dev->num_blocks);
 }
 
 static void
@@ -455,7 +463,7 @@ static int
 read_partial_block(struct virtio_dev *dev, size_t blk_num,
     size_t off_start, void *data, size_t nbytes)
 {
-	char *blk_buf = alloc_shared_buf(dev->block_size);
+	char *blk_buf = alloc_shared_buf(dev->block_size, dev->block_size);
 
 	if (off_start + nbytes > dev->block_size)
 		nbytes = dev->block_size - off_start;
@@ -537,7 +545,7 @@ static int
 write_partial_block(struct virtio_dev *dev, size_t blk_num,
     size_t off_start, void *data, size_t nbytes)
 {
-	char *blk_buf = alloc_shared_buf(dev->block_size);
+	char *blk_buf = alloc_shared_buf(dev->block_size, dev->block_size);
 	int ret;
 
 	if (off_start + nbytes > dev->block_size)
@@ -1208,4 +1216,20 @@ virtio_get_completed(struct virtio_dev *dev)
 
 	rc = rte_ring_mc_dequeue(dev->outring, &desc);
 	return (rc == 0) ? desc : NULL;
+}
+
+/*
+ * Added value of this function is that it implicitly aligns the memory at
+ * block size of the virtio device.
+ */
+void *
+virtio_buf_alloc(struct virtio_dev *dev, int size)
+{
+	return alloc_shared_buf(size, dev->block_size);
+}
+
+void
+virtio_buf_free(void *buf)
+{
+	free_shared_buf(buf);
 }
