@@ -107,7 +107,7 @@ int write_async(dev_handle_t dev, void *data, size_t offset, size_t bufsiz,
 	rc = virtio_submit(dev, &io_desc);
         if (rc != 0) {
             fprintf(stderr, "IO submit failed\n");
-            free_shared_buf(data);
+            virtio_buf_free(data);
             return (-1);
         }
         return wait_for_io(dev, id);
@@ -132,7 +132,7 @@ int read_async(dev_handle_t dev, void *data, size_t offset, size_t bufsiz,
         rc = virtio_submit(dev, &io_desc);
         if (rc != 0) {
             fprintf(stderr, "IO submit failed\n");
-            free_shared_buf(data);
+            virtio_buf_free(data);
             return (-1);
         }
         return wait_for_io(dev, id);
@@ -148,9 +148,9 @@ int test_io(dev_handle_t dev, int iters, size_t offset, int bufsiz, bool async)
     int write_len, read_len;
     unsigned char *data;
 
-    capacity = capacity_virtio_dev(dev);
+    capacity = virtio_dev_block_size(dev) * virtio_dev_blocks_num(dev);
 
-    data = alloc_shared_buf(bufsiz);
+    data = virtio_buf_alloc(dev, bufsiz);
     if (data == NULL)
         return (-1);
 
@@ -168,13 +168,13 @@ int test_io(dev_handle_t dev, int iters, size_t offset, int bufsiz, bool async)
 
         if (write_len < 0) {
             fprintf(stderr, "Write dev failed\n");
-            free_shared_buf(data);
+            virtio_buf_free(data);
             return (-1);
         } else if (write_len != bufsiz) {
             if (write_len != capacity - offset) {
                 fprintf(stderr, "Short write (%d instead of %d)\n",
                     write_len, bufsiz);
-                free_shared_buf(data);
+                virtio_buf_free(data);
                 return (-1);
             }
         }
@@ -189,11 +189,11 @@ int test_io(dev_handle_t dev, int iters, size_t offset, int bufsiz, bool async)
 
         if (read_len < 0) {
             fprintf(stderr, "Read dev failed\n");
-            free_shared_buf(data);
+            virtio_buf_free(data);
             return (-1);
         } else if (read_len != write_len) {
             fprintf(stderr, "Short read (%d instead of %d)\n", read_len, write_len);
-            free_shared_buf(data);
+            virtio_buf_free(data);
             return (-1);
         }
 
@@ -202,7 +202,7 @@ int test_io(dev_handle_t dev, int iters, size_t offset, int bufsiz, bool async)
             if (data[i] != i % 0xff) {
                 fprintf(stderr, "Data corruption at index %d (%u instead of %u)\n",
                     i, data[i], i);
-                free_shared_buf(data);
+                virtio_buf_free(data);
                 return (-1);
             }
         }
@@ -210,7 +210,7 @@ int test_io(dev_handle_t dev, int iters, size_t offset, int bufsiz, bool async)
         offset %= capacity;
     }
 
-    free_shared_buf(data);
+    virtio_buf_free(data);
     return (0);
 }
 

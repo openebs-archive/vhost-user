@@ -65,8 +65,11 @@ typedef struct async_io_desc {
 
 int libvirtio_dev_init(int mem_mb);
 dev_handle_t open_virtio_dev(const char *sock);
-size_t capacity_virtio_dev(dev_handle_t hdl);
+size_t virtio_dev_block_size(dev_handle_t hdl);
+size_t virtio_dev_blocks_num(dev_handle_t hdl);
 void close_virtio_dev(dev_handle_t hdl);
+void *virtio_buf_alloc(struct virtio_dev *dev, int size);
+void virtio_buf_free(void *buf);
 
 // sync API
 int read_virtio_dev(dev_handle_t hdl, void *buf, size_t blk_offset, size_t nblk);

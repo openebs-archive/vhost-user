@@ -100,7 +100,7 @@ virtio_task_alloc_buf_part(virtio_task_t *task, size_t size, bool response,
 
 	assert(task->count < task->limit);
 
-	data = alloc_shared_buf(size);
+	data = alloc_shared_buf(size, 0);
 	if (data == NULL)
 		return (NULL);
 	if (zero)

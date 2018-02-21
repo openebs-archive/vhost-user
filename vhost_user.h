@@ -1,6 +1,7 @@
 /*-
  *   BSD LICENSE
  *
+ *   Copyright (c) Intel Corporation.
  *   Copyright (c) Cloudbyte Corporation.
  *   All rights reserved.
  *

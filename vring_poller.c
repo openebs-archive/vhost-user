@@ -277,10 +277,14 @@ vring_poller_stop(vring_poller_t *poller)
 }
 
 /*
- * Save new task into ring buffer for later dispatch to vring.
+ * Dispatch the task to vring.
  *
- * The callback is executed directly by poller thread, so it should be fast and
- * it should not block.
+ * Provided callback is executed directly by poller thread, so it should be
+ * fast and it should not block.
+ *
+ * TODO: Originally poller thread was submitting tasks to vring. Now we
+ * modify the vring directly, so the function and its friends should be rather
+ * moved to vring.c and should not require poller argument.
  */
 int
 vring_submit_task(vring_poller_t *poller, virtio_task_t *task, task_cb_t cb,

@@ -43,8 +43,8 @@
  * These are essentially wrappers around dpdk's rte_eal calls.
  */
 int init_shared_mem(int mem_mb);
-void *alloc_shared_buf(int size);
-void *zalloc_shared_buf(int size);
+void *alloc_shared_buf(int size, int alignment);
+void *zalloc_shared_buf(int size, int alignment);
 void free_shared_buf(void *buf);
 int get_memory_fds(int *fds, size_t *size);
 void get_memory_info(VhostUserMemory *memory);
