@@ -41,7 +41,8 @@ currently set to 8.
 DPDK's memory allocator and ring buffer implementation is used in the library
 (until we have our own implementation of these two features). You can either
 checkout DPDK repo or use SPDK's DPDK submodule in case you already have
-SPDK sources on your machine. Using DPDK repo:
+SPDK sources on your machine. vhost-user was tested with DPDK version
+18.08. Using DPDK repo:
 
 ```
 git clone git://dpdk.org/dpdk
@@ -105,7 +106,7 @@ Before running the test program, start SPDK vhost app in another window.
 Example of spdk.conf file for vhost app is in the repo. Option "-t all"
 prints detailed debug messages to output. In SPDK repo:
 ```
-sudo ./app/vhost/vhost -c spdk.conf -t all
+sudo ./app/vhost/vhost -c spdk.conf -S /tmp -t all
 ```
 
 Following command runs the test program which does 100 async write-read
@@ -113,7 +114,7 @@ iterations verifying the content starting from offset 0 (second
 iteration from offset 1000, then from 2000, ...).
 If the test passes then the return code is zero.
 ```
-sudo ./build/app/test -s /path/to/spdk/vhost.0 -i 100 -a -S 1000
+sudo ./build/app/test -s /tmp/vhost.0 -i 100 -a -S 1000
 ```
 
 ### FIO virtio engine
