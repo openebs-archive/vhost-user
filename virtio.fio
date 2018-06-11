@@ -14,4 +14,4 @@ hugepage_mem=1024
 
 [test]
 numjobs=1
-filename=/repos/spdk/vhost.0
+filename=/tmp/vhost.0
