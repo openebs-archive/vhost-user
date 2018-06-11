@@ -136,14 +136,18 @@ init_shared_mem(int mem_mb)
 	char *argv[20];
 	int argc = 0;
 	char mem_opt[20];
+	char file_prefix[30];
 
 	snprintf(mem_opt, 20, "-m%d", mem_mb);
+	snprintf(file_prefix, 30, "--file-prefix=pid%d", getpid());
 
 	argv[argc++] = "vhost";
 	//argv[argc++] = "--log-level=10";
 	argv[argc++] = "--no-pci";
 	argv[argc++] = "--no-hpet";
 	argv[argc++] = mem_opt;
+	// to avoid conflict between multiple running instances
+	argv[argc++] = file_prefix;
 	argv[argc] = NULL;
 
 	if (rte_eal_init(argc, argv) < 0) {
