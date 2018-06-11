@@ -43,8 +43,20 @@ struct virtio_fio_options {
 	unsigned mem_mb;
 };
 
+#if FIO_IOOPS_VERSION >= 24
+typedef enum fio_q_status fio_q_status_t;
+#else
+typedef int fio_q_status_t;
+#endif
+
 static dev_handle_t g_hdl = NULL;
 static bool g_virtio_env_initialized = false;
+#if FIO_IOOPS_VERSION >= 24
+typedef enum fio_q_status fio_q_status_t;
+#else
+typedef int fio_q_status_t;
+#endif
+
 
 /* Called for each thread to fill in the 'real_file_size' member for
  * each file associated with this thread. This is called prior to
@@ -152,7 +164,7 @@ virtio_fio_io_u_free(struct thread_data *td, struct io_u *io_u)
 	}
 }
 
-static int
+static fio_q_status_t
 virtio_fio_queue_sync(struct thread_data *td, struct io_u *io_u)
 {
 	int rc = 1;
@@ -185,7 +197,7 @@ virtio_fio_queue_sync(struct thread_data *td, struct io_u *io_u)
 	return FIO_Q_COMPLETED;
 }
 
-static int
+static fio_q_status_t
 virtio_fio_queue(struct thread_data *td, struct io_u *io_u)
 {
 	int rc = 1;

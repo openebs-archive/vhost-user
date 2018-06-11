@@ -1,31 +1,70 @@
-
+#
+#  BSD LICENSE
+#
+#  Copyright (c) Intel Corporation.
+#  Copyright (c) Mayadata 2018
+#  Copyright (c) 2015-2016, Micron Technology, Inc.
+#  All rights reserved.
+#
+#  Redistribution and use in source and binary forms, with or without
+#  modification, are permitted provided that the following conditions
+#  are met:
+#
+#    * Redistributions of source code must retain the above copyright
+#      notice, this list of conditions and the following disclaimer.
+#    * Redistributions in binary form must reproduce the above copyright
+#      notice, this list of conditions and the following disclaimer in
+#      the documentation and/or other materials provided with the
+#      distribution.
+#    * Neither the name of Intel Corporation nor the names of its
+#      contributors may be used to endorse or promote products derived
+#      from this software without specific prior written permission.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+#  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+#  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+#  A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+#  OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+#  LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+#  DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+#  THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+#  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+#  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ifeq ($(RTE_SDK),)
-	$(error RTE_SDK is not defined)
+       $(error RTE_SDK is not defined)
 endif
 
 ifeq ($(FIO_SOURCE_DIR),)
-	$(error FIO_SOURCE_DIR is not defined)
+       $(error FIO_SOURCE_DIR is not defined)
 endif
 
+ifeq ($(SPDK_ROOT_DIR),)
+       $(error SPDK_ROOT_DIR not defined)
+endif
 
-RTE_TARGET ?= x86_64-native-linuxapp-gcc
+include $(SPDK_ROOT_DIR)/mk/spdk.common.mk
+include $(SPDK_ROOT_DIR)/mk/spdk.app.mk
+include $(SPDK_ROOT_DIR)/mk/spdk.modules.mk
 
-include $(RTE_SDK)/mk/rte.vars.mk
+APP := fio_plugin
 
+C_SRCS = fio_plugin.c
 CFLAGS += -I$(FIO_SOURCE_DIR)
-CFLAGS += -O3
-CFLAGS += -Wall -Werror
-CFLAGS += -D_GNU_SOURCE
-#CFLAGS += -ggdb3 -O0
-LDFLAGS += -rpath=$(CURDIR)/lib
-LDLIBS += --whole-archive -lrte_eal -lrte_ring --no-whole-archive -lnuma
+LDFLAGS += -shared -rdynamic 
 
-SHARED := fio_virtio
+SPDK_LIB_LIST +=  util bdev conf copy rpc jsonrpc json log
 
-LIB_SRC := vhost_client.c vhost_user.c shm.c vring.c
-LIB_SRC += virtio_task.c vring_poller.c virtio_dev.c
-APP_SRC := fio_plugin.c
+LIBS += $(BLOCKDEV_MODULES_LINKER_ARGS)
+LIBS += $(SPDK_LIB_LINKER_ARGS) $(ENV_LINKER_ARGS)
 
-SRCS-y := $(LIB_SRC) $(APP_SRC)
+all: $(APP)
+	@:
 
-include $(RTE_SDK)/mk/rte.extshared.mk
+$(APP) : $(OBJS) $(SPDK_LIB_FILES) $(ENV_LIBS) $(BLOCKDEV_MODULES_FILES)
+	$(LINK_C)
+
+clean:
+	$(CLEAN_C) $(APP)
+
+include $(SPDK_ROOT_DIR)/mk/spdk.deps.mk
