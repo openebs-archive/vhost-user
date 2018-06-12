@@ -1,10 +1,10 @@
 
 ifeq ($(RTE_SDK),)
-	$(error RTE_SDK is not defined)
+       $(error RTE_SDK is not defined)
 endif
 
 ifeq ($(FIO_SOURCE_DIR),)
-	$(error FIO_SOURCE_DIR is not defined)
+       $(error FIO_SOURCE_DIR is not defined)
 endif
 
 
