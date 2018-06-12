@@ -91,9 +91,9 @@ struct virtio_dev {
 };
 
 int
-libvirtio_dev_init(int mem_mb)
+libvirtio_dev_init(int mem_mb, int core_mask)
 {
-	return (init_shared_mem(mem_mb));
+	return (init_shared_mem(mem_mb, core_mask));
 }
 
 static int

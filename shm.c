@@ -131,15 +131,17 @@ error:
  * functionality which is not needed.
  */
 int
-init_shared_mem(int mem_mb)
+init_shared_mem(int mem_mb, int mask)
 {
 	char *argv[20];
 	int argc = 0;
 	char mem_opt[20];
+	char core_mask[20];
 	char file_prefix[30];
 
 	snprintf(mem_opt, 20, "-m%d", mem_mb);
 	snprintf(file_prefix, 30, "--file-prefix=pid%d", getpid());
+	snprintf(core_mask, 20, "-c %x", mask);
 
 	argv[argc++] = "vhost";
 	//argv[argc++] = "--log-level=10";
@@ -148,6 +150,7 @@ init_shared_mem(int mem_mb)
 	argv[argc++] = mem_opt;
 	// to avoid conflict between multiple running instances
 	argv[argc++] = file_prefix;
+	argv[argc++] = core_mask;
 	argv[argc] = NULL;
 
 	if (rte_eal_init(argc, argv) < 0) {

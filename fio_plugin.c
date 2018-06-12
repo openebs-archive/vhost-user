@@ -41,6 +41,7 @@
 struct virtio_fio_options {
 	void *padding;
 	unsigned mem_mb;
+	unsigned core_mask;
 };
 
 static dev_handle_t g_hdl = NULL;
@@ -64,6 +65,14 @@ virtio_fio_setup(struct thread_data *td)
 {
 	struct virtio_fio_options *eo = (struct virtio_fio_options *)td->eo;
 	int mem_mb = (eo->mem_mb == 0) ? 1024 : eo->mem_mb;
+
+	/*
+	 *  FIO has a cpumask field as well, however this is currently
+	 *  not available (#if 0-ed) in the thread_data structure
+	 *
+	 */
+
+	int core_mask = (eo->core_mask == 0) ? 1 : eo->core_mask;
 	unsigned int i;
 	struct fio_file *f;
 	const char *filename = NULL;
@@ -74,7 +83,7 @@ virtio_fio_setup(struct thread_data *td)
 	}
 
 	if (!g_virtio_env_initialized) {
-		if (libvirtio_dev_init(mem_mb) != 0) {
+		if (libvirtio_dev_init(mem_mb, core_mask) != 0) {
 			fprintf(stderr, "Failed to initialize\n");
 			return -1;
 		}
@@ -272,6 +281,15 @@ static struct fio_option options[] = {
 		.type		= FIO_OPT_INT,
 		.off1		= offsetof(struct virtio_fio_options, mem_mb),
 		.help 		= "Memory to allocate for virtio from huge pages in MB",
+		.category	= FIO_OPT_C_ENGINE,
+		.group		= FIO_OPT_G_INVALID,
+	},
+	{
+		.name		= "core_mask",
+		.lname		= "core mask",
+		.type		= FIO_OPT_INT,
+		.off1		= offsetof(struct virtio_fio_options, core_mask),
+		.help 		= "core mask",
 		.category	= FIO_OPT_C_ENGINE,
 		.group		= FIO_OPT_G_INVALID,
 	},
