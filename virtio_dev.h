@@ -63,7 +63,7 @@ typedef struct async_io_desc {
 	ssize_t retval;  // code as would have been normally returned by read/write call
 } async_io_desc_t;
 
-int libvirtio_dev_init(int mem_mb);
+int libvirtio_dev_init(int mem_mb, int core_mask);
 dev_handle_t open_virtio_dev(const char *sock);
 size_t virtio_dev_block_size(dev_handle_t hdl);
 size_t virtio_dev_blocks_num(dev_handle_t hdl);

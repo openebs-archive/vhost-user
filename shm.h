@@ -42,7 +42,7 @@
  *
  * These are essentially wrappers around dpdk's rte_eal calls.
  */
-int init_shared_mem(int mem_mb);
+int init_shared_mem(int mem_mb, int core_mask);
 void *alloc_shared_buf(int size, int alignment);
 void *zalloc_shared_buf(int size, int alignment);
 void free_shared_buf(void *buf);
