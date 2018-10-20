@@ -1,33 +1,33 @@
 
 # vhost-user client library
 
-Goal of this project is to provide simple API for reading and writing bytes
+The Goal of this project is to provide simple API for reading and writing bytes
 from storage backend provided by [SPDK](https://github.com/spdk/spdk) vhost
 app. Compared to SPDK's virtio library this library does not enforce any
 particular application design (non-blocking and busy polling style adopted by
 SPDK and applications built on top of it). Thus it is more suitable for legacy
-applications which are typicaly multithreaded and use classic synchronization
+applications which are typically multithreaded and use classic synchronization
 primitives.
 
 This is a **proof of concept** suitable for experimenting and evaluating
-performance. It is neither feature complete nor stable enough and design of
+performance. It neither feature complete nor stable enough and design of
 some parts would need to change considerably to make it production ready.
 
 ## System configuration
 
 IO buffers and shared virtio structures (vrings) must reside in huge pages.
-There is a limit on number of shared memory regions, which does not make
+There is a limit on the number of shared memory regions, which does not make
 practical to use any other huge page size than 1GB. The most convenient is
 to automatically allocate huge pages during system boot. Modify
-/etc/default/grub to contain following line (in this case we allocate 4 pages,
+/etc/default/grub to contain the following line (in this case we allocate 4 pages,
 but can be anything greater or equal to 2):
 
 ```
 GRUB_CMDLINE_LINUX_DEFAULT="hugepagesz=1GB hugepages=4 default_hugepagesz=1GB"
 ```
 Then regenerate grub configuration file (update-grub command) and reboot.
-Allocating huge pages dynamically when system is booted is also possible by
-writting to a file in /sys (as root):
+Allocating huge pages dynamically when the system is booted is also possible by
+writing to a file in /sys (as root):
 
 ```
 echo 4 > /sys/kernel/mm/hugepages/hugepages-1048576kB/nr_hugepages
@@ -65,7 +65,7 @@ ln -s build x86_64-native-linuxapp-gcc
 ```
 
 Configure option --with-fio takes care of building DPDK with -fPIC. The symlink
-created in last step is needed for DPDK's makefiles for external apps, so
+created in the last step is needed for DPDK's makefiles for external apps, so
 that they can find DPDK libraries.
 
 For building FIO engine fio sources are needed (in fact only the header files,
@@ -78,13 +78,13 @@ cd fio
 make
 ```
 
-and of course SPDK is needed because it is our storage backend. Follow
+and of course, SPDK is needed because it is our storage backend. Follow
 instructions in SPDK's README for building it.
 
 ## Building
 
 The build system is hacky currently. Makefiles from DPDK repo for building
-external applications and libraries are used. However they are not suitable
+external applications and libraries are used. However, they are not suitable
 for building more complicated things with internal dependencies. So there are 
 two makefiles for building two targets and "Makefile" symlink to one of them
 decides what will be built. The two targets are:
@@ -148,13 +148,13 @@ always set to 1.
 
 ## Adaptive polling
 
-There are two basic approaches for synchronization between consumer and
-producer. Either event based notification (using eventfd file descriptor
+There are two basic approaches to synchronization between consumer and
+producer. Either event-based notification (using eventfd file descriptor
 and read/write syscall) or polling (checking condition in a busy loop).
 As explained earlier busy polling does not play well with multithreaded
 programs using blocking calls. We modified busy polling method by inserting
-relatively short sleep into a busy loop. However that does not perform well
-in all cases and requires manual tuning of sleep interval. For sequential IO
+relatively short sleep into a busy loop. However, that does not perform well
+in all cases and requires manual tuning of the sleep interval. For sequential IO
 it increases latency way too much. Hence we utilize both approaches based on
 detected workload. We distinguish between two types of workloads:
 
